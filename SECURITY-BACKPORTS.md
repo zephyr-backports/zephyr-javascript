@@ -27,7 +27,16 @@ artefact rebuild (trailers `Built-From:`); the Type column is `pick`, `pin` or `
   `05ff98b3835515d82cac03b8f86ae740586c8f60a36badd15deda6041c8eefc5`: emsdk 3.1.10, boost 1.84.0, OpenSSL and
   unbound headers only) at the canonical build path `/tmp/zeph-wasm/build`. The commit carries one
   `Built-From:` trailer per source; `dist/build-manifest.json` records pins, patches, toolchain, flags and output hashes,
-  `dist/SHA256SUMS` the hashes of the seven `dist/` files.
+  `dist/SHA256SUMS` the hashes of the seven `dist/` files:
+  `monero_wallet_full.wasm` `c984b999dd76550ab8135a0d7ddfd34b5fc7774200f8887aaa5f4984a7c7b1e4`,
+  `monero_wallet_full.js` `5cd17d48e821f606fff603e9db4fd2a4aba8c8628a452d79ad73434c48ae32ad`,
+  `monero_wallet_keys.wasm` `fc630b04d52dc500823c9d02383a317bd27e1946b7b20a9bdc141ef29216d13b`,
+  `monero_wallet_keys.js` `69b02e1e9f12064b845a9d06ed3577a54eeedcafd679dbc283ae515470abe607`,
+  `monero_web_worker.js` `923f551c9e27260bc1da63e97f335b96a3e8b2a7c4622bcb955ef8b0b6b0d7ac`,
+  `monero_web_worker.js.map` `ae2b5afe453922aac8fc624fbe7765195e85d43bb23882cad3738da5c813d55e`,
+  `monero_web_worker.js.LICENSE.txt` `5f4f84c2d4dd4507ea51b95cf42b500068e2b2307fbd0137f8db809c645d011b` (unchanged
+  from upstream). The worker bundle is built with the package's own `npm run build_web_worker` (webpack 5.77.0) from
+  the unpinned install of the base lockfile (`npm ci`, Node v22.23.4, npm 10.9.9).
 - **Class:** the classes of the advisories it carries: memory, dos, funds, privacy
 - **Component:** `dist/monero_wallet_full.{wasm,js}`, `dist/monero_wallet_keys.{wasm,js}` (the wallet core compiled
   to WebAssembly, with its emscripten glue) and `dist/monero_web_worker.js` with its source map (the web worker bundle,
@@ -57,10 +66,38 @@ artefact rebuild (trailers `Built-From:`); the Type column is `pick`, `pin` or `
   harness smoke test (keys from seed, 40-block sync to tip, reserve info, serialisation, reopen) OK and cross-open both
   ways with upstream's prebuilt dist (`9d022ded`, keys `a541c83c`) OK; worker bundle built with zephyr-javascript's own
   `npm run build_web_worker` (webpack 5.77.0), which on upstream's own `dist/` reproduces upstream's bundle
-  byte-for-byte (`set-2026-11-07-dist.md`); which advisories are compiled in: `set-2026-11-07-wasm-inputs.md`. Pending:
+  byte-for-byte, and which gave the same seven hashes in two separate runs from a fresh `npm ci`
+  (`set-2026-11-07-dist.md`); which advisories are compiled in: `set-2026-11-07-wasm-inputs.md`. Pending:
   fork CI provenance run on the published branch; the signature of the build manifest with the release key; the
   wallet flows the harness does not reach (sending, which needs funds or a mocked node).
 - **Notes:** the worker bundle also contains third-party JavaScript (`crypto-js`, `ajv`, `lodash`, `qs`) at the
-  versions of the base lockfile (`crypto-js` 4.1.1, `ajv` 6.12.6, `lodash` 4.17.21, `qs` 6.5.3). Byte identity with
+  versions of the base lockfile (`crypto-js` 4.1.1, `ajv` 6.12.6, `lodash` 4.17.21, `qs` 6.5.3); the dependency pins
+  for these were not applied (see "Not applied" below). Byte identity with
   upstream's `dist/` is not a goal (upstream's build embeds paths of its build machine); byte identity between two
   builds at the same path is (2026-11-05, same inputs, same path: identical bytes).
+
+## Not applied
+
+### Dependency pins for `crypto-js`, `lodash`, `ajv` (and `qs`)
+
+Four advisories against production dependencies have a fixed version inside the declared ranges:
+GHSA-xwcq-pm8m-c4vf (`crypto-js` < 4.2.0, critical: PBKDF2 defaults far weaker than specified),
+GHSA-r5fr-rjxr-66jc (`lodash` <= 4.17.23, high: code injection via `_.template` imports key names),
+GHSA-xxjr-mmjv-4gpg (`lodash` <= 4.17.22, moderate: prototype pollution in `_.unset`, `_.omit`, `_.pullAt`) and
+GHSA-2g4f-4pwh-qvx6 (`ajv` < 6.14.0, moderate: ReDoS with the `$data` option). They are not pinned on this branch:
+
+- **Not reachable from the library's own code, as measured:** zephyr-javascript calls `crypto-js` only for `MD5`
+  (HTTP digest authentication), never `PBKDF2`; it does not use `lodash` itself, and the worker bundle contains only
+  twelve small `lodash` helpers (`isArray`, `isFunction` and the like), not `template`, `unset`, `omit` or `pullAt`;
+  `ajv` arrives only through `request` → `har-validator`, which creates it without `$data`.
+- **No installable pin:** npm 10 produces the four fixed versions only by rewriting `package-lock.json` from format
+  v1 to v3, and on the v3 lockfile `npm ci` stops with a peer-dependency conflict (`worker-loader` 2.0.0 expects
+  webpack 3 or 4, the package uses webpack 5) that the v1 lockfile does not record. npm 6, which keeps format v1,
+  changes `package.json` and raises dev tools (webpack, Babel, jsdoc), and its audit data moves neither `crypto-js`
+  nor `qs`.
+
+`qs` 6.5.3 (through `request`) has two advisories, GHSA-6rw7-vpxm-498p and GHSA-4mjr-xmp4-gh2g; the in-range
+version 6.5.5 closes neither (they need 6.14.1 and 6.16.0). The remaining advisories of the dependency tree
+(`request`, `form-data`, `tough-cookie`, `uuid`, `serialize-javascript`) have no fix that npm can apply within the
+declared ranges; upstream removed `request` by a code change, which is out of scope here. Measurement (files in
+evidence/deps/2026-11-07/): `zephyr-javascript-pins.md`.
